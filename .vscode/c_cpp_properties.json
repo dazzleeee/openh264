@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "Mac-clang",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/Users/sihanzhang/openh264/codec/api" 
+            ],
+            "defines": [],
+            "macFrameworkPath": [
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
+            ],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c11",
+            "intelliSenseMode": "macos-clang-arm64"
+        }
+    ],
+    "version": 4
+}

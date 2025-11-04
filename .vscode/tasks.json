@@ -1,0 +1,34 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build with clang (simple_encoder)",
+            "type": "shell",
+            "command": "clang",
+            "args": [
+                "-g",
+                "${workspaceFolder}/CompressionYUV/simple_encoder.c",
+
+                // ---  这就是您缺失的那一行 ---
+                // 1. 将 "快捷方式" (或真实文件) 本身交给链接器
+                // (链接器会智能地跟随它找到 .2.6.0 文件)
+                "/Users/sihanzhang/openh264/libopenh264.8.dylib",
+
+                // --- 输出文件 ---
+                "-o",
+                "${workspaceFolder}/CompressionYUV/simple_encoder",
+                
+                // --- 2. 告诉编译器头文件在哪里 ---
+                "-I/Users/sihanzhang/openh264/codec/api",
+
+                // --- 3. 告诉可执行文件在"运行时"去哪里找库 ---
+                "-Wl,-rpath,/Users/sihanzhang/openh264"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$gcc"]
+        }
+    ]
+}

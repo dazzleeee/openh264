@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run simple_encoder",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/CompressionYUV/simple_encoder",
+            "args": [],
+            "cwd": "${workspaceFolder}/CompressionYUV",
+            "preLaunchTask": "Build with clang (simple_encoder)",
+        }
+
+    ]
+}
