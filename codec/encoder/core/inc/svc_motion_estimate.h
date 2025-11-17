@@ -38,11 +38,11 @@
  *************************************************************************************
  */
 #ifndef SVC_MOTION_ESTIMATE_
-#define SVC_MOTION_ESTIMATE_
+#define SVC_MOTION_ESTIMATE_ //防止重复包含
 
-#include "typedefs.h"
-#include "encoder_context.h"
-#include "wels_func_ptr_def.h"
+#include "typedefs.h" //基本类型定义
+#include "encoder_context.h"//编码器的数据和状态信息
+#include "wels_func_ptr_def.h"//一些函数，比如SAD计算，比如行搜索
 
 namespace WelsEnc {
 #define CAMERA_STARTMV_RANGE (64)

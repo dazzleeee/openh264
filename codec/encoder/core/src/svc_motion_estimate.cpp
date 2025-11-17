@@ -1092,6 +1092,296 @@ void WelsDiamondCrossFeatureSearch (SWelsFuncPtrList* pFunc, SWelsME* pMe, SSlic
   }
 }
 
+void EmbeddedSearch (SWelsFuncPtrList* pFuncList, SWelsME* pMe, SSlice* pSlice,
+                     const int32_t kiStrideEnc,  const int32_t kiStrideRef){
+  // initialize variables  
+
+  //get the function to compute sad for current block later
+  PSampleSadSatdCostFunc pSad = pFuncList->sSampleDealingFuncs.pfSampleSad[pMe->uiBlockSize];
+  const SMVUnitXY ksMvStartMin = pSlice->sMvStartMin;// Normally the min and max is -32768, -32768(int 16),
+  // which means here is unlimited.
+  const SMVUnitXY ksMvStartMax = pSlice->sMvStartMax;
+  SMVUnitXY center = pMe->sMv; //define the center mv.
+  // SMVUnitXY center = pMe->sMv; //Maybe we don't need it,we can use iX,iY to represent the mv offset relative to smvp.
+  uint8_t* centerRef = pMe->pRefMb;//the pointer on reference block of current macroblock，which won't change during search
+  uint8_t* const kpEncMb = pMe->pEncMb;//the pointer on current encoding block of current macroblock，
+  uint32_t centerCost = pMe->uiSadCost;//initialize the center cost
+  int32_t rangeX = ksMvStartMax.iMvX - ksMvStartMin.iMvX;//get the search range in x and y direction
+  int32_t rangeY = ksMvStartMax.iMvY - ksMvStartMin.iMvY;
+  int32_t step = (rangeX > rangeY ? rangeX : rangeY) >> 1;//initial step size is half of max range
+  if (step < 1)//make sure step is at least 1
+    step = 1;
+  SMVUnitXY bestMv  = center;// initialize best mv with center mv
+  uint8_t*  bestRef = centerRef;// initialize best ref with center ref
+  uint32_t  bestCost = centerCost;// initialize best cost with center cost
+
+  
+  //use lambda to compute cost at given mv,since lambda capture all variables.Not sure if it is necessary.
+  auto get_cost_at_mv = [&] (const SMVUnitXY& mv, uint8_t*& pRefOut) -> uint32_t {
+  //check mv is in valid range    
+    if (mv.iMvX <ksMvStartMin.iMvX || mv.iMvX > ksMvStartMax.iMvX ||
+        mv.iMvY <ksMvStartMin.iMvY || mv.iMvY > ksMvStartMax.iMvY) {
+      pRefOut = NULL;
+      return 0xFFFFFFFFU;
+    }
+    //compute cost
+    uint8_t* pRefMb = pMe->pColoRefMb + mv.iMvY * kiStrideRef + mv.iMvX; //get the pointer on reference block for current mv
+    uint32_t sad = pSad (pMe->pEncMb, kiStrideEnc, pRefMb, kiStrideRef);//compute sad for current mv
+    int32_t qdx = (mv.iMvX << 2) - pMe->sMvp.iMvX;//compute mvd(x) in qpel
+    int32_t qdy = (mv.iMvY << 2) - pMe->sMvp.iMvY;//compute mvd(y) in qpel
+    uint32_t cost = sad + COST_MVD (pMe->pMvdCost, qdx, qdy);//compute total cost
+    pRefOut = pRefMb;//set output ref pointer
+    return cost;//return total cost
+  };
+  //first time 2D log search
+  {
+    SMVUnitXY cand; //candidate mv
+    uint8_t*  ref;//candidate ref pointer
+    uint32_t  cost;//candidate cost
+
+    // up search
+    cand = center;//initialize candidate mv with center mv
+    cand.iMvY -= step;//move up
+    cost = get_cost_at_mv (cand, ref);//get cost at candidate mv
+    if (cost < bestCost) { //update best mv if cost is better
+      bestCost = cost;
+      bestMv   = cand;
+      bestRef  = ref;
+    }
+   // down search
+    cand = center;
+    cand.iMvY += step;
+    cost = get_cost_at_mv (cand, ref);
+    if (cost < bestCost) {
+      bestCost = cost;
+      bestMv   = cand;
+      bestRef  = ref;
+    }
+
+    // left search
+    cand = center;
+    cand.iMvX -= step;
+    cost = get_cost_at_mv (cand, ref);
+    if (cost < bestCost) {
+      bestCost = cost;
+      bestMv   = cand;
+      bestRef  = ref;
+    }
+
+    // right search
+    cand = center;
+    cand.iMvX += step;
+    cost = get_cost_at_mv (cand, ref);
+    if (cost < bestCost) {
+      bestCost = cost;
+      bestMv   = cand;
+      bestRef  = ref;
+    }
+      pMe->sMv       = bestMv;
+      pMe->pRefMb    = bestRef;
+      pMe->uiSadCost = bestCost;
+      return;
+  }
+  //second time 2Dlog search
+  {
+    center     = bestMv;
+    centerRef  = bestRef;
+    centerCost = bestCost;
+
+
+    SMVUnitXY cand;
+    uint8_t*  ref;
+    uint32_t  cost;
+
+    // up
+    cand = center;
+    cand.iMvY -= step;
+    cost = get_cost_at_mv (cand, ref);
+    if (cost < bestCost) {
+      bestCost = cost;
+      bestMv   = cand;
+      bestRef  = ref;
+    }
+
+    // down
+    cand = center;
+    cand.iMvY += step;
+    cost = get_cost_at_mv (cand, ref);
+    if (cost < bestCost) {
+      bestCost = cost;
+      bestMv   = cand;
+      bestRef  = ref;
+    }
+
+    // left
+    cand = center;
+    cand.iMvX -= step;
+    cost = get_cost_at_mv (cand, ref);
+    if (cost < bestCost) {
+      bestCost = cost;
+      bestMv   = cand;
+      bestRef  = ref;
+    }
+
+    //right
+    cand = center;
+    cand.iMvX += step;
+    cost = get_cost_at_mv (cand, ref);
+    if (cost < bestCost) {
+      bestCost = cost;
+      bestMv   = cand;
+      bestRef  = ref;
+    }
+
+    //  If best mv is still center,then we are done.
+    if (bestMv.iMvX == center.iMvX && bestMv.iMvY == center.iMvY) {
+      pMe->sMv       = bestMv;
+      pMe->pRefMb    = bestRef;
+      pMe->uiSadCost = bestCost;
+      return;
+    }
+     // Update center with best mv found in second 2Dlog search
+    center     = bestMv;
+    centerRef  = bestRef;
+    centerCost = bestCost;
+  }
+  //final TSS search
+  {
+  const int32_t tssStep = 1;
+
+
+  SMVUnitXY cand;
+  uint8_t*  ref;
+  uint32_t  cost;
+
+  // up
+  cand = center;
+  cand.iMvY -= tssStep;
+  cost = get_cost_at_mv (cand, ref);
+  if (cost < bestCost) {
+    bestCost = cost;
+    bestMv   = cand;
+    bestRef  = ref;
+  }
+
+  // down
+  cand = center;
+  cand.iMvY += tssStep;
+  cost = get_cost_at_mv (cand, ref);
+  if (cost < bestCost) {
+    bestCost = cost;
+    bestMv   = cand;
+    bestRef  = ref;
+  }
+
+  // left
+  cand = center;
+  cand.iMvX -= tssStep;
+  cost = get_cost_at_mv (cand, ref);
+  if (cost < bestCost) {
+    bestCost = cost;
+    bestMv   = cand;
+    bestRef  = ref;
+  }
+
+  // right
+  cand = center;
+  cand.iMvX += tssStep;
+  cost = get_cost_at_mv (cand, ref);
+  if (cost < bestCost) {
+    bestCost = cost;
+    bestMv   = cand;
+    bestRef  = ref;
+  }
+
+  // left up
+  cand = center;
+  cand.iMvX -= tssStep;
+  cand.iMvY -= tssStep;
+  cost = get_cost_at_mv (cand, ref);
+  if (cost < bestCost) {
+    bestCost = cost;
+    bestMv   = cand;
+    bestRef  = ref;
+  }
+
+  // right up
+  cand = center;
+  cand.iMvX += tssStep;
+  cand.iMvY -= tssStep;
+  cost = get_cost_at_mv (cand, ref);
+  if (cost < bestCost) {
+    bestCost = cost;
+    bestMv   = cand;
+    bestRef  = ref;
+  }
+
+  // left down
+  cand = center;
+  cand.iMvX -= tssStep;
+  cand.iMvY += tssStep;
+  cost = get_cost_at_mv (cand, ref);
+  if (cost < bestCost) {
+    bestCost = cost;
+    bestMv   = cand;
+    bestRef  = ref;
+  }
+
+  // right down
+  cand = center;
+  cand.iMvX += tssStep;
+  cand.iMvY += tssStep;
+  cost = get_cost_at_mv (cand, ref);
+  if (cost < bestCost) {
+    bestCost = cost;
+    bestMv   = cand;
+    bestRef  = ref;
+  }
+}
+
+// wright back ME, WelsMotionEstimateSearch will call MeEndIntepelSearch do qpel and hpel search.
+pMe->sMv       = bestMv;
+pMe->pRefMb    = bestRef;
+pMe->uiSadCost = bestCost;
+}
+                      // //initialize variables
+  // PSample4SadCostFunc pSad = pFuncList->sSampleDealingFuncs.pfSample4Sad[pMe->uiBlockSize];//get the function to compute sad for current block later
+  // uint8_t* pFref = pMe->pRefMb;//the pointer on reference block of current macroblock，which won't change during search
+  // uint8_t* const kpEncMb = pMe->pEncMb;//the pointer on current encoding block of current macroblock，
+  // //don't need to change pointer
+  // const uint16_t* kpMvdCost = pMe->pMvdCost;//the pointer on mvd cost table,
+  // //don't need to change the content of cost table,but may be change the table.
+  // const SMVUnitXY ksMvStartMin = pSlice->sMvStartMin;//Normally the min and max is -32768, -32768(int 16),
+  // //which means here is unlimited.
+  // const SMVUnitXY ksMvStartMax = pSlice->sMvStartMax;
+  // int32_t iMvDx = ((pMe->sMv.iMvX) * (1 << 2)) - pMe->sMvp.iMvX;//sMv is interger pixel mv,smvp is qpel mv.
+  // int32_t iMvDy = ((pMe->sMv.iMvY) * (1 << 2)) - pMe->sMvp.iMvY;//iMvDx and iMvDy is qpel mv relative to smvp.
+  // uint8_t* pRefMb = pFref; //the pointer on reference block of current macroblock,which will change during search.
+  // int32_t iBestCost = pMe->uiSadCost;//initialize the best cost with current sad cost.
+  // int32_t iTimeThreshold = ITERATIVE_TIMES;//the max search times for each direction
+  // ENFORCE_STACK_ALIGN_1D (int32_t, iSadCosts, 4, 16)//single instruction,multiple data(SIMD) to compute 4 sad at one time(16 byte).
+  // //initialized process done.
+  
+  // //start search
+  // while (iTimeThreshold --){
+  //   pMe->sMv.iMvX = (iMvDx + pMe->sMvp.iMvX) >> 2;//get the integer pixel mv for current search center.
+  //   pMe->sMv.iMvY = (iMvDy + pMe->sMvp.iMvY) >> 2;
+  //   if (!CheckMvInRange (pMe->sMv, ksMvStartMin, ksMvStartMax))
+  //     continue;//check if current search center mv is in valid range.
+  //   pSad (kpEncMb, kiStrideEnc, pRefMb, kiStrideRef, &iSadCosts[0]);//compute sad for current search center and four other points.
+  //   int32_t iX, iY;//Record the best mv offset in this iteration.
+  //   //
+  //   const bool kbIsBestCostWorse = WelsMeSadCostSelect (iSadCosts, kpMvdCost, &iBestCost, iMvDx, iMvDy, &iX, &iY);
+  //   if (kbIsBestCostWorse)
+  //     break;//if best cost is worse than previous best cost,break the search.
+  //   //Next is the process of updating search center.
+
+
+      
+  //   //to be completed,this is fine search pattern.
+  //   iMvDx -= (iX * (1 << 2)) ;
+  //   iMvDy -= (iY * (1 << 2)) ;
+  // }
 
 } // namespace WelsEnc
 
