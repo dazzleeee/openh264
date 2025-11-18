@@ -4,25 +4,34 @@
         {
             "label": "Build with clang (simple_encoder)",
             "type": "shell",
-            "command": "clang",
+            "command": "clang++ -g ${workspaceFolder}/CompressionYUV/simple_encoder.cpp -L/Users/sihanzhang/openh264 -lopenh264.8 -o ${workspaceFolder}/CompressionYUV/simple_encoder -I/Users/sihanzhang/openh264/codec/api -Wl,-rpath,/Users/sihanzhang/openh264 && install_name_tool -change /usr/local/lib/libopenh264.8.dylib @rpath/libopenh264.8.dylib ${workspaceFolder}/CompressionYUV/simple_encoder",
                 "args": [
-                    "-g",
-                    "${workspaceFolder}/CompressionYUV/simple_encoder.cpp",
+                    // "-g",
+                    // "${workspaceFolder}/CompressionYUV/simple_encoder.cpp",
+                    // // --- 这是修改后的部分 ---
+                    // // 1. 告诉链接器去哪里“搜索”库
+                    // "-L/Users/sihanzhang/openh264",
 
-                    // ---  这就是您缺失的那一行 ---
-                    // 1. 将 "快捷方式" (或真实文件) 本身交给链接器
-                    // (链接器会智能地跟随它找到 .2.6.0 文件)
-                    "/Users/sihanzhang/openh264/libopenh264.8.dylib",
+                    // // 2. 告诉链接器要链接的库的“名字”
+                    // // (它会自动寻找 libopenh264.8.dylib)
+                    // "-lopenh264.8", 
+                    // // --- 修改结束 ---
 
-                    // --- 输出文件 ---
-                    "-o",
-                    "${workspaceFolder}/CompressionYUV/simple_encoder",
+
+                    // // // ---  这就是您缺失的那一行 ---
+                    // // // 1. 将 "快捷方式" (或真实文件) 本身交给链接器
+                    // // // (链接器会智能地跟随它找到 .2.6.0 文件)
+                    // // "/Users/sihanzhang/openh264/libopenh264.8.dylib",
+
+                    // // --- 输出文件 ---
+                    // "-o",
+                    // "${workspaceFolder}/CompressionYUV/simple_encoder",
                     
-                    // --- 2. 告诉编译器头文件在哪里 ---
-                    "-I/Users/sihanzhang/openh264/codec/api",
+                    // // --- 2. 告诉编译器头文件在哪里 ---
+                    // "-I/Users/sihanzhang/openh264/codec/api",
 
-                    // --- 3. 告诉可执行文件在"运行时"去哪里找库 ---
-                    "-Wl,-rpath,/Users/sihanzhang/openh264"
+                    // // --- 3. 告诉可执行文件在"运行时"去哪里找库 ---
+                    // "-Wl,-rpath,/Users/sihanzhang/openh264"
                 ],
             "group": {
                 "kind": "build",
