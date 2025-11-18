@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <chrono> // [COMPARISON] 1. 包含 C++ 时间库
 
 // 包含 OpenH264 (Wels) API 头文件
 // 你需要确保这个路径在你的 include path 中
@@ -35,7 +36,7 @@ int main() {
     memset(&param, 0, sizeof(SEncParamExt));
     
     // 从编码器获取默认参数
-    ((*encoder)->GetDefaultParams)(encoder, &param);
+    encoder->GetDefaultParams(&param);
 
 
     // --- 覆盖关键参数 ---
@@ -43,6 +44,11 @@ int main() {
     param.iPicWidth = WIDTH;
     param.iPicHeight = HEIGHT;
     param.fMaxFrameRate = (float)FRAME_RATE;
+
+    // [COMPARISON] 2. 开启 PSNR 计算
+    param.bPsnrY = true;
+    param.bPsnrU = true;
+    param.bPsnrV = true;
 
     // 速率控制 (RC)
     param.iRCMode = RC_BITRATE_MODE; // 码率控制模式
@@ -64,18 +70,19 @@ int main() {
     param.sSpatialLayers[0].sSliceArgument.uiSliceMode = SM_SINGLE_SLICE; // 简单的单 slice 模式
     
     // 3. 初始化编码器
-    rv = ((*encoder)->InitializeExt)(encoder, &param);
+    rv = encoder->InitializeExt(&param);
     if (rv != 0) {
         fprintf(stderr, "Encoder InitializeExt failed. rv = %d\n", rv);
         WelsDestroySVCEncoder(encoder);
         return -1;
     }
+  
 
     // 4. 准备文件 I/O
     FILE* f_in = fopen(INPUT_FILE, "rb");
     if (!f_in) {
         fprintf(stderr, "Error: Cannot open input file: %s\n", INPUT_FILE);
-        ((*encoder)->Uninitialize)(encoder);
+        encoder->Uninitialize();
         WelsDestroySVCEncoder(encoder);
         return -1;
     }
@@ -84,7 +91,7 @@ int main() {
     if (!f_out) {
         fprintf(stderr, "Error: Cannot open output file: %s\n", OUTPUT_FILE);
         fclose(f_in);
-        ((*encoder)->Uninitialize)(encoder);
+        encoder->Uninitialize();
         WelsDestroySVCEncoder(encoder);
         return -1;
     }
@@ -98,6 +105,10 @@ int main() {
     pic.iPicWidth = WIDTH;
     pic.iPicHeight = HEIGHT;
     pic.iColorFormat = videoFormatI420;
+
+    pic.bPsnrY = true;
+    pic.bPsnrU = true;
+    pic.bPsnrV = true;
     
     // Stride (步幅) = 宽度
     pic.iStride[0] = pic.iPicWidth;
@@ -110,13 +121,22 @@ int main() {
         fprintf(stderr, "Error: malloc failed for YUV buffer\n");
         fclose(f_in);
         fclose(f_out);
-        ((*encoder)->Uninitialize)(encoder);
+        encoder->Uninitialize();
         WelsDestroySVCEncoder(encoder);
         return -1;
     }
     
     printf("Starting encoding %s -> %s\n", INPUT_FILE, OUTPUT_FILE);
     int frame_count = 0;
+
+    // [COMPARISON] 3. 初始化统计变量
+    long long total_bytes = 0;
+    double total_psnr_y = 0.0;
+    double total_psnr_u = 0.0;
+    double total_psnr_v = 0.0;
+
+// [COMPARISON] 4. 初始化一个累加的计时器
+    std::chrono::duration<double, std::milli> total_encoding_time_ms(0);
 
     // 6. 编码循环
     while (fread(yuv_buffer, 1, FRAME_SIZE, f_in) == FRAME_SIZE) {
@@ -127,9 +147,14 @@ int main() {
         pic.pData[1] = pic.pData[0] + Y_SIZE;
         // V平面
         pic.pData[2] = pic.pData[1] + UV_SIZE;
-
+        // [COMPARISON] 5. 在编码 *之前* 启动计时器
+        auto encodeStartTime = std::chrono::high_resolution_clock::now();
         // 7. 编码一帧
-        rv = ((*encoder)->EncodeFrame)(encoder, &pic, &info);
+        rv = encoder->EncodeFrame(&pic, &info);
+        // [COMPARISON] 6. 在编码 *之后* 停止计时器
+        auto encodeEndTime = std::chrono::high_resolution_clock::now();
+        // [COMPARISON] 7. 累加 *纯* 编码时间
+        total_encoding_time_ms += (encodeEndTime - encodeStartTime);
         if (rv != 0) {
             fprintf(stderr, "EncodeFrame failed for frame %d. rv = %d\n", frame_count, rv);
             continue;
@@ -137,9 +162,16 @@ int main() {
 
         // 8. 将编码后的数据写入文件
         if (info.eFrameType != videoFrameTypeSkip) {
+            total_bytes += info.iFrameSizeInBytes;
+            int topLayer = info.iLayerNum - 1; // 获取最高空间层 (我们只关心它)
+            if (topLayer >= 0) {
+                total_psnr_y += info.sLayerInfo[topLayer].rPsnr[0]; // Y
+                total_psnr_u += info.sLayerInfo[topLayer].rPsnr[1]; // U
+                total_psnr_v += info.sLayerInfo[topLayer].rPsnr[2]; // V
+            }
             for (int i = 0; i < info.iLayerNum; ++i) {
                 SLayerBSInfo* layer = &info.sLayerInfo[i];
-                
+
                 // 1. 计算这一层的总字节数
                 int total_layer_length = 0;
                 for (int j = 0; j < layer->iNalCount; ++j) {
@@ -150,8 +182,9 @@ int main() {
                 if (total_layer_length > 0) {
                     fwrite(layer->pBsBuf, 1, total_layer_length, f_out);
                 }
+                
             }
-        }
+        } 
 
         frame_count++;
         if (frame_count % 10 == 0) {
@@ -159,13 +192,34 @@ int main() {
         }
     }
 
+
     // 9. 清理
     printf("Encoding finished. Total frames: %d\n", frame_count);
-    
+   
+    // [COMPARISON] 9. 打印最终对比结果
+    if (frame_count > 0) {
+        double avg_psnr_y = total_psnr_y / frame_count;
+        double avg_psnr_u = total_psnr_u / frame_count;
+        double avg_psnr_v = total_psnr_v / frame_count;
+        double video_duration = (double)frame_count / FRAME_RATE;
+        double avg_bitrate_kbps = (total_bytes * 8) / (video_duration * 1000.0);
+        double total_encoding_seconds = total_encoding_time_ms.count() / 1000.0;
+
+        printf("\n--- COMPARISON RESULTS ---\n");
+        printf("Total ENCODING Time: %.3f ms (%.3f seconds)\n", total_encoding_time_ms.count(), total_encoding_seconds);
+        printf("Average FPS (CPU):   %.2f\n", frame_count / total_encoding_seconds);
+        printf("Total Size:          %lld bytes\n", total_bytes);
+        printf("Avg Bitrate:         %.2f kbps\n", avg_bitrate_kbps);
+        printf("Avg Y-PSNR:          %.2f dB\n", avg_psnr_y);
+        printf("Avg U-PSNR:          %.2f dB\n", avg_psnr_u);
+        printf("Avg V-PSNR:          %.2f dB\n", avg_psnr_v);
+        printf("---------------------------\n");
+    }
+
     free(yuv_buffer);
     fclose(f_in);
     fclose(f_out);
-    ((*encoder)->Uninitialize)(encoder);
+    encoder->Uninitialize();
     WelsDestroySVCEncoder(encoder);
 
     return 0;
